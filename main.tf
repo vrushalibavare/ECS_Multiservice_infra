@@ -11,7 +11,8 @@ data "aws_subnets" "public" {
 }
 
 module "vpc" {
-  source = "terraform-aws-modules/vpc/aws"
+  source  = "terraform-aws-modules/vpc/aws"
+  version = "~> 5.0"
 
   name = "${var.name}-vpc"
   cidr = "10.0.0.0/16"
@@ -82,7 +83,7 @@ resource "aws_security_group" "ecs_sg" {
 
 module "ecs" {
   source       = "terraform-aws-modules/ecs/aws"
-  version      = "~> 5.9.0"
+  version      = "~> 5.12.0"
   cluster_name = "${var.name}-cluster"
   fargate_capacity_providers = {
     FARGATE = {
@@ -102,12 +103,22 @@ module "ecs" {
       container_definitions = {
         s3-container = {
           essential = true
-          image     = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.name}.amazonaws.com/${aws_ecr_repository.s3_app.name}:latest"
+          image     = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.id}.amazonaws.com/${aws_ecr_repository.s3_app.name}:latest"
           name      = "${var.name}-s3-container"
           port_mappings = [
             {
               containerPort = 5001
               protocol      = "tcp"
+            }
+          ]
+          environment = [
+            {
+              name  = "BUCKET_NAME"
+              value = aws_s3_bucket.app_bucket.bucket
+            },
+            {
+              name  = "AWS_REGION"
+              value = data.aws_region.current.id
             }
           ]
         }
@@ -124,21 +135,31 @@ module "ecs" {
 
     }
 
-    "${var.name}-sns-service" = {
+    "${var.name}-sqs-service" = {
       cpu    = 512
       memory = 1024
 
       task_role_arn = aws_iam_role.ecs_task_role.arn
 
       container_definitions = {
-        sns-container = {
+        sqs-container = {
           essential = true
-          image     = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.name}.amazonaws.com/${aws_ecr_repository.sns_app.name}:latest"
-          name      = "${var.name}-sns-container"
+          image     = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.id}.amazonaws.com/${aws_ecr_repository.sqs_app.name}:latest"
+          name      = "${var.name}-sqs-container"
           port_mappings = [
             {
               containerPort = 5002
               protocol      = "tcp"
+            }
+          ]
+          environment = [
+            {
+              name  = "QUEUE_URL"
+              value = aws_sqs_queue.app_queue.url
+            },
+            {
+              name  = "AWS_REGION"
+              value = data.aws_region.current.id
             }
           ]
         }
@@ -216,7 +237,7 @@ resource "aws_iam_role_policy" "ecs_task_policy" {
           "sqs:DeleteMessage",
           "sqs:GetQueueAttributes"
         ]
-        Resource = "*"
+        Resource = aws_sqs_queue.app_queue.arn
       }
     ]
   })
@@ -226,6 +247,7 @@ resource "aws_s3_bucket" "app_bucket" {
   bucket = "${var.name}-s3-app-bucket"
 }
 
-resource "aws_sns_topic" "app_topic" {
-  name = "${var.name}-sns-app-topic"
+resource "aws_sqs_queue" "app_queue" {
+  name = "${var.name}-sqs-app-queue"
 }
+
