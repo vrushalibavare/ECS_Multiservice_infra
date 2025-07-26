@@ -91,8 +91,8 @@ resource "aws_ecs_task_definition" "s3_app" {
   requires_compatibilities = ["FARGATE"]
   cpu                      = "512"
   memory                   = "1024"
-  task_role_arn           = aws_iam_role.ecs_task_role.arn
-  execution_role_arn      = aws_iam_role.ecs_task_execution_role.arn
+  task_role_arn            = aws_iam_role.ecs_task_role.arn
+  execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
 
   container_definitions = jsonencode([
     {
@@ -133,8 +133,8 @@ resource "aws_ecs_task_definition" "sqs_app" {
   requires_compatibilities = ["FARGATE"]
   cpu                      = "512"
   memory                   = "1024"
-  task_role_arn           = aws_iam_role.ecs_task_role.arn
-  execution_role_arn      = aws_iam_role.ecs_task_execution_role.arn
+  task_role_arn            = aws_iam_role.ecs_task_role.arn
+  execution_role_arn       = aws_iam_role.ecs_task_execution_role.arn
 
   container_definitions = jsonencode([
     {
