@@ -175,6 +175,7 @@ resource "aws_ecs_service" "s3_service" {
   task_definition = aws_ecs_task_definition.s3_app.arn
   desired_count   = 1
   launch_type     = "FARGATE"
+  force_new_deployment = true
 
   network_configuration {
     subnets          = module.vpc.public_subnets
@@ -189,6 +190,7 @@ resource "aws_ecs_service" "sqs_service" {
   task_definition = aws_ecs_task_definition.sqs_app.arn
   desired_count   = 1
   launch_type     = "FARGATE"
+  force_new_deployment = true
 
   network_configuration {
     subnets          = module.vpc.public_subnets
