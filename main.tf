@@ -47,7 +47,7 @@ resource "aws_ecr_repository" "sqs_app" {
   image_tag_mutability = "MUTABLE"
   force_delete         = true
   tags = {
-    name    = "${var.name}-sns-app"
+    name    = "${var.name}-sqs-app"
     Project = "Coaching_18"
   }
   lifecycle {
@@ -81,119 +81,145 @@ resource "aws_security_group" "ecs_sg" {
   }
 }
 
-module "ecs" {
-  source       = "terraform-aws-modules/ecs/aws"
-  version      = "~> 5.12.0"
-  cluster_name = "${var.name}-cluster"
-  fargate_capacity_providers = {
-    FARGATE = {
-      default_capacity_provider_strategy = {
-        weight = 100
-      }
-    }
-  }
+resource "aws_ecs_cluster" "main" {
+  name = "${var.name}-cluster"
+}
 
-  services = {
-    "${var.name}-s3-service" = {
-      cpu    = 512
-      memory = 1024
+resource "aws_ecs_task_definition" "s3_app" {
+  family                   = "${var.name}-s3-task"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = "512"
+  memory                   = "1024"
+  task_role_arn           = aws_iam_role.ecs_task_role.arn
+  execution_role_arn      = aws_iam_role.ecs_task_execution_role.arn
 
-      task_role_arn = aws_iam_role.ecs_task_role.arn
-
-      container_definitions = {
-        s3-container = {
-          essential = true
-          image     = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.id}.amazonaws.com/${aws_ecr_repository.s3_app.name}:latest"
-          name      = "${var.name}-s3-container"
-          port_mappings = [
-            {
-              containerPort = 5001
-              protocol      = "tcp"
-            }
-          ]
-          environment = [
-            {
-              name  = "BUCKET_NAME"
-              value = aws_s3_bucket.app_bucket.bucket
-            },
-            {
-              name  = "AWS_REGION"
-              value = data.aws_region.current.id
-            }
-          ]
+  container_definitions = jsonencode([
+    {
+      name      = "${var.name}-s3-container"
+      image     = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.id}.amazonaws.com/${aws_ecr_repository.s3_app.name}:latest"
+      essential = true
+      portMappings = [
+        {
+          containerPort = 5001
+          protocol      = "tcp"
+        }
+      ]
+      environment = [
+        {
+          name  = "BUCKET_NAME"
+          value = aws_s3_bucket.app_bucket.bucket
+        },
+        {
+          name  = "AWS_REGION"
+          value = data.aws_region.current.id
+        }
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.ecs_logs.name
+          "awslogs-region"        = data.aws_region.current.id
+          "awslogs-stream-prefix" = "ecs"
         }
       }
-
-      desired_count                        = 1
-      service_type                         = "REPLICA"
-      availability_zone_rebalance_strategy = "SPREAD"
-      assign_public_ip                     = true
-      deployment_minimum_healthy_percent   = 100
-      subnet_ids                           = data.aws_subnets.public.ids
-      security_group_ids                   = [aws_security_group.ecs_sg.id]
-
-
     }
+  ])
+}
 
-    "${var.name}-sqs-service" = {
-      cpu    = 512
-      memory = 1024
+resource "aws_ecs_task_definition" "sqs_app" {
+  family                   = "${var.name}-sqs-task"
+  network_mode             = "awsvpc"
+  requires_compatibilities = ["FARGATE"]
+  cpu                      = "512"
+  memory                   = "1024"
+  task_role_arn           = aws_iam_role.ecs_task_role.arn
+  execution_role_arn      = aws_iam_role.ecs_task_execution_role.arn
 
-      task_role_arn = aws_iam_role.ecs_task_role.arn
-
-      container_definitions = {
-        sqs-container = {
-          essential = true
-          image     = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.id}.amazonaws.com/${aws_ecr_repository.sqs_app.name}:latest"
-          name      = "${var.name}-sqs-container"
-          port_mappings = [
-            {
-              containerPort = 5002
-              protocol      = "tcp"
-            }
-          ]
-          environment = [
-            {
-              name  = "QUEUE_URL"
-              value = aws_sqs_queue.app_queue.url
-            },
-            {
-              name  = "AWS_REGION"
-              value = data.aws_region.current.id
-            }
-          ]
+  container_definitions = jsonencode([
+    {
+      name      = "${var.name}-sqs-container"
+      image     = "${data.aws_caller_identity.current.account_id}.dkr.ecr.${data.aws_region.current.id}.amazonaws.com/${aws_ecr_repository.sqs_app.name}:latest"
+      essential = true
+      portMappings = [
+        {
+          containerPort = 5002
+          protocol      = "tcp"
+        }
+      ]
+      environment = [
+        {
+          name  = "QUEUE_URL"
+          value = aws_sqs_queue.app_queue.url
+        },
+        {
+          name  = "AWS_REGION"
+          value = data.aws_region.current.id
+        }
+      ]
+      logConfiguration = {
+        logDriver = "awslogs"
+        options = {
+          "awslogs-group"         = aws_cloudwatch_log_group.ecs_logs.name
+          "awslogs-region"        = data.aws_region.current.id
+          "awslogs-stream-prefix" = "ecs"
         }
       }
-
-      desired_count                        = 1
-      service_type                         = "REPLICA"
-      availability_zone_rebalance_strategy = "SPREAD"
-      assign_public_ip                     = true
-      deployment_minimum_healthy_percent   = 100
-      subnet_ids                           = data.aws_subnets.public.ids
-      security_group_ids                   = [aws_security_group.ecs_sg.id]
     }
+  ])
+}
+
+resource "aws_ecs_service" "s3_service" {
+  name            = "${var.name}-s3-service"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.s3_app.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
+
+  network_configuration {
+    subnets          = module.vpc.public_subnets
+    security_groups  = [aws_security_group.ecs_sg.id]
+    assign_public_ip = true
   }
 }
 
-# resource "aws_iam_role" "ecs_task_execution_role" {
-#   name = "${var.name}-ecs-task-execution-role"
-#   assume_role_policy = jsonencode({
-#     Version = "2012-10-17"
-#     Statement = [{
-#       Action = "sts:AssumeRole"
-#       Effect = "Allow"
-#       Principal = {
-#         Service = "ecs-tasks.amazonaws.com"
-#       }
-#     }]
-#   })
-# }
+resource "aws_ecs_service" "sqs_service" {
+  name            = "${var.name}-sqs-service"
+  cluster         = aws_ecs_cluster.main.id
+  task_definition = aws_ecs_task_definition.sqs_app.arn
+  desired_count   = 1
+  launch_type     = "FARGATE"
 
-# resource "aws_iam_role_policy_attachment" "ecs_task_execution_role_policy" {
-#   role       = aws_iam_role.ecs_task_execution_role.name
-#   policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
-# }
+  network_configuration {
+    subnets          = module.vpc.public_subnets
+    security_groups  = [aws_security_group.ecs_sg.id]
+    assign_public_ip = true
+  }
+}
+
+resource "aws_cloudwatch_log_group" "ecs_logs" {
+  name              = "/ecs/${var.name}"
+  retention_in_days = 7
+}
+
+resource "aws_iam_role" "ecs_task_execution_role" {
+  name = "${var.name}-ecs-task-execution-role"
+  assume_role_policy = jsonencode({
+    Version = "2012-10-17"
+    Statement = [{
+      Action = "sts:AssumeRole"
+      Effect = "Allow"
+      Principal = {
+        Service = "ecs-tasks.amazonaws.com"
+      }
+    }]
+  })
+}
+
+resource "aws_iam_role_policy_attachment" "ecs_task_execution_role_policy" {
+  role       = aws_iam_role.ecs_task_execution_role.name
+  policy_arn = "arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy"
+}
 
 resource "aws_iam_role" "ecs_task_role" {
   name = "${var.name}-ecs-task-role"
